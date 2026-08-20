@@ -1,0 +1,6 @@
+pandas
+rapidfuzz
+flask
+flask-cors
+groq
+python-dotenv

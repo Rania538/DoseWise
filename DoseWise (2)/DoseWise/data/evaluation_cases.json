@@ -1,0 +1,48 @@
+[
+  {
+    "name": "english_known_interaction",
+    "message": "Can I take Panadol with amoxicillin?",
+    "expected_verified_generics": ["acetaminophen", "amoxicillin"],
+    "expected_interaction_pairs": [["acetaminophen", "amoxicillin"]],
+    "expected_clarification": false
+  },
+  {
+    "name": "arabic_trade_name",
+    "message": "أنا خدت بنادول و amoxicillin، ينفع آخدهم مع بعض؟",
+    "expected_verified_generics": ["acetaminophen", "amoxicillin"],
+    "expected_interaction_pairs": [["acetaminophen", "amoxicillin"]],
+    "expected_clarification": false
+  },
+  {
+    "name": "arabizi_misspellings",
+    "message": "ana 5dt Pandol w amoxicilin, ynf3 akhodhom m3 ba3d?",
+    "expected_verified_generics": ["acetaminophen", "amoxicillin"],
+    "expected_interaction_pairs": [["acetaminophen", "amoxicillin"]],
+    "expected_clarification": false
+  },
+  {
+    "name": "multiple_medications",
+    "message": "Panadol, amoxicillin and simvastatin",
+    "expected_verified_generics": ["acetaminophen", "amoxicillin", "simvastatin"],
+    "expected_interaction_pairs": [
+      ["acetaminophen", "amoxicillin"],
+      ["acetaminophen", "simvastatin"],
+      ["amoxicillin", "simvastatin"]
+    ],
+    "expected_clarification": false
+  },
+  {
+    "name": "no_interaction_found",
+    "message": "amoxicillin and naltrexone",
+    "expected_verified_generics": ["amoxicillin", "naltrexone"],
+    "expected_interaction_pairs": [],
+    "expected_clarification": false
+  },
+  {
+    "name": "unknown_medication",
+    "message": "XyzUnknown and amoxicillin",
+    "expected_verified_generics": ["amoxicillin"],
+    "expected_interaction_pairs": [],
+    "expected_clarification": true
+  }
+]

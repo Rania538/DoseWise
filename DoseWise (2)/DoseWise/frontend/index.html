@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DoseWise — Medication Interaction Assistant</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">⚕️</div>
+        <div class="title">
+          <div class="name">DoseWise</div>
+          <div class="tag">Your AI Medication Interaction Assistant</div>
+        </div>
+      </div>
+      <div class="status"><span id="health">Checking backend...</span></div>
+    </header>
+
+    <main class="chat-shell">
+      <div class="chat-area" id="chatArea">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-card">
+            <div class="empty-title">DoseWise</div>
+            <div class="empty-sub">Your AI Medication Interaction Assistant</div>
+            <p class="empty-desc">Check potential medication interactions using a retrieval-based medical knowledge system.</p>
+            <div class="examples">
+              <button class="example">Can I take Panadol with amoxicillin?</button>
+              <button class="example">أنا باخد بنادول مع amoxicillin، ينفع أخدهم مع بعض؟</button>
+              <button class="example">I take three medications. Can I take them together?</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <textarea id="messageInput" placeholder="Ask about medications, e.g. 'Can I take Panadol with amoxicillin?'" rows="2" aria-label="Message input"></textarea>
+        <div class="actions">
+          <button id="clearBtn" class="btn ghost">Clear</button>
+          <button id="sendBtn" class="btn primary">Send</button>
+        </div>
+      </div>
+    </main>
+
+    <footer class="disclaimer">DoseWise provides medication interaction information from its available knowledge sources and does not replace a doctor or pharmacist.</footer>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

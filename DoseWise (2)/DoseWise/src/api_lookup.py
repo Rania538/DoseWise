@@ -4,7 +4,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
-CACHE_PATH = Path('d:/Documents/tessst/data/cache/api_cache.json')
+ROOT = Path(__file__).resolve().parents[1]
+CACHE_PATH = ROOT / 'data' / 'cache' / 'api_cache.json'
 CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
 if not CACHE_PATH.exists():
     CACHE_PATH.write_text(json.dumps({}))

@@ -11,23 +11,75 @@ MASTER_INTERACTIONS_PATH = ROOT / 'data' / 'processed' / 'master_interactions.cs
 UNIQUE_NAMES_PATH = ROOT / 'data' / 'processed' / 'unique_drug_names.csv'
 
 
-def detect_language(text: str) -> str:
+def detect_language_style(text: str) -> str:
+    """Classify prose style while ignoring verified medication names."""
     if not text:
-        return 'en'
-    # Arabic script
-    if re.search(r'[\u0600-\u06FF]', text):
-        return 'ar'
-    # Arabizi common digits used as phonetic markers (3,7,2)
-    if re.search(r'\b[\w]*[37][\w]*\b', text) and re.search(r'[0-9]', text):
-        return 'ar'
-    return 'en'
+        return 'english'
 
+    # Medication names are evidence for neither English nor Franco. Remove
+    # known names before counting script and language markers.
+    language_text = normalize_text(text)
+    medication_names = set(normalize_text(name) for name in SAFE_ALIASES)
+    try:
+        medication_names.update(normalize_text(name) for name in _load_unique_names())
+    except Exception:
+        pass
+    for name in sorted((name for name in medication_names if name), key=len, reverse=True):
+        language_text = re.sub(r'(?<!\w)' + re.escape(name) + r'(?!\w)', ' ', language_text)
+    language_text = re.sub(r'\s+', ' ', language_text).strip()
+
+    arabic_chars = len(re.findall(r'[\u0600-\u06FF]', language_text))
+    latin_words = re.findall(r'[A-Za-z]+', language_text)
+    
+    # Common Arabizi words without distinguishing numerals
+    arabizi_dict = {
+        'mfhmsh', 'msh', 'tmam', 'eh', 'ezay', 'leh', 'keda', 'momken', 
+        'kwayes', 'ana', 'enta', 'enti', 'izayak', 'ezayak', 'katbly', 
+        'doktor', 'tany', 'hom', 'ma3', 'wallahi', 'yb2a', 'khod', 'dawa', 'el'
+    }
+    
+    arabizi_markers = re.findall(
+        r'\b(?:' + '|'.join(arabizi_dict) + r')\b', 
+        language_text.casefold()
+    )
+    
+    has_arabizi_digits = bool(re.search(
+        r'\b(?=[A-Za-z0-9]*[A-Za-z])\w*[2356789]\w*\b',
+        language_text,
+    ))
+    
+    if arabic_chars:
+        return 'mixed' if latin_words or arabizi_markers or has_arabizi_digits else 'arabic'
+        
+    if has_arabizi_digits or arabizi_markers:
+        return 'arabizi'
+        
+    if len(language_text.split()) <= 1 and not arabizi_markers and not has_arabizi_digits:
+        if language_text.casefold() not in {
+            'hi', 'hello', 'hey', 'thanks', 'okay', 'ok', 'yes', 'yeah', 'yep',
+            'no', 'nah', 'nope', 'y', 'n',
+        }:
+            return 'arabic'
+            
+    return 'english'
+
+
+def detect_language(text: str) -> str:
+    """Return the legacy API language code while exposing the richer style separately."""
+    return 'ar' if detect_language_style(text) in ('arabic', 'arabizi', 'mixed') else 'en'
+
+
+_UNIQUE_NAMES_CACHE = None
 
 def _load_unique_names() -> List[str]:
+    global _UNIQUE_NAMES_CACHE
+    if _UNIQUE_NAMES_CACHE is not None:
+        return _UNIQUE_NAMES_CACHE
     if not UNIQUE_NAMES_PATH.exists():
         return []
     df = pd.read_csv(UNIQUE_NAMES_PATH, dtype=str)
-    return df['normalized'].dropna().astype(str).tolist()
+    _UNIQUE_NAMES_CACHE = df['normalized'].dropna().astype(str).tolist()
+    return _UNIQUE_NAMES_CACHE
 
 
 def parse_medication_followup(text: str) -> Tuple[bool, List[str]]:
@@ -118,15 +170,20 @@ def extract_medications(text: str) -> List[str]:
     """
     norm = normalize_text(text)
     candidates = []
-    alias_variants = {'بانادول': 'بنادول'}
+    alias_variants = {}
+
+    def alias_pattern(value: str) -> str:
+        # Arabic text is commonly adjacent to punctuation or other Arabic words;
+        # Unicode-aware lookarounds avoid the ASCII \b boundary edge cases.
+        return r'(?<![\w\u0600-\u06ff])' + re.escape(normalize_text(value)) + r'(?![\w\u0600-\u06ff])'
 
     # check SAFE_ALIASES keys first (these are user-facing aliases/brands)
-    for alias in SAFE_ALIASES.keys():
-        pattern = r'\b' + re.escape(normalize_text(alias)) + r'\b'
+    for alias in sorted(SAFE_ALIASES.keys(), key=len, reverse=True):
+        pattern = alias_pattern(alias)
         if re.search(pattern, norm):
             candidates.append(alias)
     for variant, alias in alias_variants.items():
-        if re.search(r'\b' + re.escape(normalize_text(variant)) + r'\b', norm):
+        if re.search(alias_pattern(variant), norm):
             candidates.append(alias)
 
     # also scan the unique normalized names list for matches
@@ -159,7 +216,8 @@ def extract_medications(text: str) -> List[str]:
         'دكتور', 'طبيب', 'صيدلي', 'كتب', 'كتبلي', 'دواء', 'عندي', 'خدت', 'ينفع', 'مع',
         'أنا', 'كنت', 'عند', 'بعدها', 'رحت', 'الأنف', 'الأذن', 'والأذن', 'وكتبلي'
         , 'اخد', 'أخد', 'اتنين', 'الاتنين', 'أخذ', 'خد', 'أخذت', 'اهلا', 'مرحبا', 'اسمي', 'ماذا', 'تساعدني', 'انت',
-        'انا', 'باخد'
+        'انا', 'باخد', 'هل', 'يمكنني', 'يمكن', 'تناول', 'تناولها', 'أقدر', 'اقدر', 'آخد', 'اخدهم', 'معهم',
+        'من', 'هذا', 'هذه', 'الدواء', 'الدواء؟'
     ])
     arabizi_blacklist = set(['ana', 'kont', '3and', 'katbly', 'katab', 'doktor', 'dokter', 'tany', 'ynf3', 'akhodhom', 'm3', 'ba3d'])
 
@@ -189,6 +247,26 @@ def extract_medications(text: str) -> List[str]:
             continue
         seen.add(key)
         ordered.append(span)
+
+    # Preserve short unknown medication-like terms beside a medication connector
+    # so the resolver can report them instead of silently dropping them.
+    connector_re = re.compile(r'\b(?:with|and|مع|و)\b|\+')
+    connector_stopwords = blacklist | ar_blacklist | arabizi_blacklist
+    for connector in connector_re.finditer(norm):
+        left = norm[:connector.start()].strip()
+        right = norm[connector.end():].strip()
+        for fragment, take_last in ((left, True), (right, False)):
+            words = re.findall(r'[A-Za-z\u0600-\u06FF0-9]{2,}', fragment)
+            if not words:
+                continue
+            candidate = words[-1] if take_last else words[0]
+            candidate_key = normalize_text(candidate)
+            if candidate_key in connector_stopwords or candidate_key in seen:
+                continue
+            if len(candidate_key) < 4 or len(candidate_key) > 32:
+                continue
+            seen.add(candidate_key)
+            ordered.append(candidate)
 
     # Conservative 'X and Y' fallback: when only one side of a simple conjunction
     # was captured (e.g. 'XyzUnknown and amoxicillin'), try to add the missing
@@ -285,6 +363,15 @@ def _norm_pair(a: str, b: str) -> Tuple[str, str]:
     return normalize_text(a), normalize_text(b)
 
 
+_MASTER_INTERACTIONS_CACHE = None
+
+def _get_master_interactions_df():
+    global _MASTER_INTERACTIONS_CACHE
+    if _MASTER_INTERACTIONS_CACHE is not None:
+        return _MASTER_INTERACTIONS_CACHE
+    _MASTER_INTERACTIONS_CACHE = pd.read_csv(MASTER_INTERACTIONS_PATH, dtype=str)
+    return _MASTER_INTERACTIONS_CACHE
+
 def retrieve_interactions(
     generic_names: List[str],
     resolved_medications: List[Dict[str, Any]] = None,
@@ -301,7 +388,7 @@ def retrieve_interactions(
     if n < 2:
         return []
 
-    df = pd.read_csv(MASTER_INTERACTIONS_PATH, dtype=str)
+    df = _get_master_interactions_df()
     ingredient_lookup = {}
     for medication in resolved_medications or []:
         generic = medication.get('generic_name')
@@ -395,30 +482,80 @@ def retrieve_interactions(
 
 
 def generate_response(user_message: str, language: str, resolved: List[Dict[str, Any]], retrievals: List[Dict[str, Any]]) -> str:
-    # Build a safe, non-inventive answer from retrieved evidence
-    intro_en = "According to the available interaction database,"
-    intro_ar = "بحسب قاعدة البيانات المستخدمة،"
+    """Build concise sections from verified medications and DDInter evidence only."""
+    arabic = language in ('ar', 'arabic', 'mixed')
+    meds = []
+    for item in resolved:
+        if item.get('verified'):
+            generic = item.get('generic_name') or (item.get('active_ingredients') or [None])[0]
+            input_name = item.get('input')
+            name = input_name or generic
+            if input_name and generic and normalize_text(input_name) != normalize_text(generic):
+                name = f'{input_name} ({generic})'
+            if name and name not in meds:
+                meds.append(name)
 
-    if language == 'ar':
-        lines = [intro_ar]
-        for r in retrievals:
-            if r['ddinter_rows'] > 0 and r['interaction_level']:
-                lines.append(f"تم العثور على تفاعل بين {r['drug_a']} و{r['drug_b']} بدرجة {r['interaction_level'].capitalize()}.")
+    if language == 'arabizi':
+        lines = ['💊 El adweya elly et3raf 3aleha']
+        lines.extend(f'- {name}' for name in meds)
+        if retrievals:
+            lines.append('🔍 Natiget el drug interaction')
+            for item in retrievals:
+                if item.get('ddinter_rows') and item.get('interaction_level'):
+                    lines.append(f"- Feh interaction ma3roofa ben {item['drug_a']} w {item['drug_b']} fe DDInter.")
+                else:
+                    lines.append(f"- Mafeesh interaction ma3roofa ben {item['drug_a']} w {item['drug_b']} fe data el DDInter el mota7a.")
+            levels = [item.get('interaction_level') for item in retrievals if item.get('interaction_level')]
+            if levels:
+                lines.extend(['⚠️ Severity', f"- {', '.join(sorted(set(level.capitalize() for level in levels)))}"])
+            lines.extend(['📌 El tafseel', '- El result da mabny bas 3ala records matched fe DDInter.', '📚 El evidence', '- Source: DDInter'])
+            for item in retrievals:
+                if item.get('chunk_ids'):
+                    lines.append(f"- Record ID: {', '.join(item['chunk_ids'])}")
+        if meds:
+            lines.extend(['⚠️ Safety Note', '- Matwa2afsh wala te8ayar dawa prescribed men 8eer ma tes2al doctor aw pharmacist.'])
+        return '\n'.join(lines)
+
+    if arabic:
+        lines = ['💊 الأدوية التي تم اكتشافها']
+        lines.extend(f'- {name}' for name in meds)
+        if retrievals:
+            lines.append('🔍 نتيجة التداخل الدوائي')
+            for item in retrievals:
+                if item.get('ddinter_rows') and item.get('interaction_level'):
+                    lines.append(f"- تم تسجيل تفاعل بين {item['drug_a']} و{item['drug_b']} في DDInter.")
+                else:
+                    lines.append(f"- لم يتم تحديد تفاعل بين {item['drug_a']} و{item['drug_b']} في قاعدة بيانات DDInter المتاحة.")
+            levels = [item.get('interaction_level') for item in retrievals if item.get('interaction_level')]
+            if levels:
+                lines.extend(['⚠️ درجة الخطورة', f"- {', '.join(sorted(set(level.capitalize() for level in levels)))}"])
+            lines.extend(['📌 التوضيح', '- هذه النتيجة مبنية على السجلات المطابقة في قاعدة بيانات DDInter فقط.', '📚 المصدر', '- DDInter'])
+            for item in retrievals:
+                if item.get('chunk_ids'):
+                    lines.append(f"- السجل: {', '.join(item['chunk_ids'])}")
+        if meds:
+            lines.extend(['⚠️ ملاحظة السلامة', '- لا تغيّر أو توقف دواءً موصوفًا دون استشارة الطبيب أو الصيدلي.'])
+        return '\n'.join(lines)
+
+    lines = ['💊 Medications Detected']
+    lines.extend(f'- {name}' for name in meds)
+    if retrievals:
+        lines.append('🔍 Interaction Result')
+        for item in retrievals:
+            if item.get('ddinter_rows') and item.get('interaction_level'):
+                lines.append(f"- Interaction detected between {item['drug_a']} and {item['drug_b']} in DDInter.")
             else:
-                lines.append(f"لم يتم تحديد تفاعل بين {r['drug_a']} و{r['drug_b']} في قاعدة البيانات المتاحة.")
-        lines.append("لا تغيّر أو توقف أي دواء موصوف لك من نفسك، ويفضل مراجعة الطبيب أو الصيدلي.")
-        return ' '.join(lines)
-
-    # default English
-    lines = [intro_en]
-    for r in retrievals:
-        if r['ddinter_rows'] > 0 and r['interaction_level']:
-            lines.append(f"a {r['interaction_level'].capitalize()} interaction was identified between {r['drug_a']} and {r['drug_b']}.")
-        else:
-            lines.append(f"No interaction was identified in the available DDInter knowledge base for {r['drug_a']} and {r['drug_b']}.")
-
-    lines.append("Do not stop or change a prescribed medication without consulting your doctor or pharmacist.")
-    return ' '.join(lines)
+                lines.append(f"- No interaction was identified in the available DDInter knowledge base for {item['drug_a']} and {item['drug_b']}.")
+        levels = [item.get('interaction_level') for item in retrievals if item.get('interaction_level')]
+        if levels:
+            lines.extend(['⚠️ Severity', f"- {', '.join(sorted(set(level.capitalize() for level in levels)))}"])
+        lines.extend(['📌 Explanation', '- This result is based only on matching records in the DDInter database.', '📚 Evidence', '- Source: DDInter'])
+        for item in retrievals:
+            if item.get('chunk_ids'):
+                lines.append(f"- Record ID: {', '.join(item['chunk_ids'])}")
+    if meds:
+        lines.extend(['⚠️ Safety Note', '- Do not stop or change a prescribed medication without consulting your doctor or pharmacist.'])
+    return '\n'.join(lines)
 
 
 def process_message(user_message: str, conversation_context: Dict[str, Any] = None, active_medications: List[str] = None) -> Dict[str, Any]:
@@ -427,6 +564,7 @@ def process_message(user_message: str, conversation_context: Dict[str, Any] = No
     if active_medications is None:
         active_medications = []
 
+    language_style = detect_language_style(user_message)
     lang = detect_language(user_message)
 
     # handle pending clarification in context-aware mode
@@ -439,7 +577,8 @@ def process_message(user_message: str, conversation_context: Dict[str, Any] = No
         # if user simply confirms
         if user_norm in affirm:
             # attempt to accept pending term as intended and re-resolve it
-            span = pending.get('input') or pending.get('normalized_input')
+            suggestion = pending.get('suggestion') or {}
+            span = suggestion.get('user_term') or pending.get('input') or pending.get('normalized_input')
             # re-resolve the pending short term
             new_res = resolve_drug(span, ddinter_csv_path=MASTER_INTERACTIONS_PATH)
             # mark as user_confirmed for traceability
@@ -450,7 +589,9 @@ def process_message(user_message: str, conversation_context: Dict[str, Any] = No
             resolved = [new_res]
             verified_generics = []
             if new_res.get('verified'):
-                verified_generics.append(new_res.get('generic_name') or (new_res.get('active_ingredients') or [None])[0])
+                for ingredient in (new_res.get('active_ingredients') or [new_res.get('generic_name')]):
+                    if ingredient:
+                        verified_generics.append(ingredient)
                 
             all_generics = list(verified_generics)
             for m in active_medications:
@@ -458,9 +599,10 @@ def process_message(user_message: str, conversation_context: Dict[str, Any] = No
                     all_generics.append(m)
                     
             retrievals = retrieve_interactions(all_generics, resolved, new_medications=verified_generics)
-            response = generate_response(user_message, lang, resolved, retrievals)
+            response = generate_response(user_message, language_style, resolved, retrievals)
             return {
                 'language': lang,
+                'language_style': language_style,
                 'extracted': [span],
                 'resolved': resolved,
                 'verified_generics': verified_generics,
@@ -472,11 +614,17 @@ def process_message(user_message: str, conversation_context: Dict[str, Any] = No
             conversation_context.pop('pending_clarification', None)
             res = {
                 'language': lang,
+                'language_style': language_style,
                 'extracted': [],
                 'resolved': [],
                 'verified_generics': [],
                 'retrievals': [],
-                'response': 'Please provide the correct medication name.' if lang == 'en' else 'من فضلك اذكر اسم الدواء الصحيح.'
+                'response': (
+                    'من فضلك اذكر اسم الدواء الصحيح.'
+                    if language_style in ('arabic', 'mixed')
+                    else 'Momken tekteb esm el dawa el sa7?' if language_style == 'arabizi'
+                    else 'Please provide the correct medication name.'
+                )
             }
             return res
     is_followup, followup_extracted = parse_medication_followup(user_message)
@@ -508,7 +656,8 @@ def process_message(user_message: str, conversation_context: Dict[str, Any] = No
 
     for r in resolved:
         if r.get('verified'):
-            gen = r.get('generic_name') or (r.get('active_ingredients') or [None])[0]
+            ingredients = r.get('active_ingredients') or [r.get('generic_name')]
+            gen = ingredients[0] if ingredients else None
             # safety check: if the API simply echoed the input as generic and that generic
             # is not in our known lists, treat as ambiguous (do not guess)
             if r.get('source') == 'rxnav' and gen and normalize_text(gen) == normalize_text(r.get('input')) and normalize_text(gen) not in known_generics:
@@ -520,12 +669,13 @@ def process_message(user_message: str, conversation_context: Dict[str, Any] = No
                     clarification.append(r)
                     unique_resolved.append(r)
                 continue
-            if gen:
-                gen_norm = normalize_text(gen)
-                if gen_norm not in seen_generics:
-                    seen_generics.add(gen_norm)
-                    verified_generics.append(gen)
-                    unique_resolved.append(r)
+            for ing in ingredients:
+                if ing:
+                    gen_norm = normalize_text(ing)
+                    if gen_norm not in seen_generics:
+                        seen_generics.add(gen_norm)
+                        verified_generics.append(ing)
+            unique_resolved.append(r)
         else:
             input_norm = normalize_text(r.get('input'))
             if input_norm not in seen_unverified:
@@ -553,15 +703,30 @@ def process_message(user_message: str, conversation_context: Dict[str, Any] = No
         first = clarification[0]
         # store pending clarification in conversation context for follow-up
         conversation_context['pending_clarification'] = first
-        if lang == 'ar':
-            response = f"هل كنت تقصد {first.get('input')} ({first.get('normalized_input')})؟"
+        if language_style in ('arabic', 'mixed'):
+            suggestion = first.get('suggestion')
+            if suggestion:
+                response = f"لم أتمكن من تحديد {first.get('input')}. هل كنت تقصد {suggestion['user_term']} ({suggestion['generic_name']})؟\nلن أُجري تحليل التداخل حتى تؤكد اسم الدواء."
+            else:
+                response = f"لم أتمكن من تحديد {first.get('input')}. من فضلك وضح اسم الدواء.\nلن أُجري تحليل التداخل حتى تؤكد اسم الدواء."
+        elif language_style == 'arabizi':
+            suggestion = first.get('suggestion')
+            if suggestion:
+                response = f"Msh 3aref {first.get('input')}. 2asdak {suggestion['user_term']} ({suggestion['generic_name']})?\nMesh ha3mel interaction check 7atta t2aked esm el dawa."
+            else:
+                response = f"Msh 3aref {first.get('input')}. Momken twadda7 esm el dawa?\nMesh ha3mel interaction check 7atta t2aked esm el dawa."
         else:
-            response = f"Did you mean {first.get('input')}?"
+            suggestion = first.get('suggestion')
+            if suggestion:
+                response = f"I couldn't identify '{first.get('input')}'. Did you mean {suggestion['user_term']} ({suggestion['generic_name']})?\nI won't run the interaction check until you confirm the medication name."
+            else:
+                response = f"I couldn't identify '{first.get('input')}'. Please clarify the medication name.\nI won't run the interaction check until you confirm the medication name."
     else:
-        response = generate_response(user_message, lang, resolved, retrievals)
+        response = generate_response(user_message, language_style, resolved, retrievals)
 
     return {
         'language': lang,
+        'language_style': language_style,
         'extracted': extracted,
         'resolved': resolved,
         'verified_generics': verified_generics,

@@ -206,3 +206,11 @@ def test_variants_and_confirmation_flow():
     assert 'pending_clarification' in ctx2
     resp_no = rp.process_message('no', conversation_context=ctx2)
     assert 'Please provide the correct medication name' in resp_no['response'] or 'من فضلك' in resp_no['response']
+
+
+def test_language_detection_styles():
+    assert rp.detect_language_style("أنا مريض") == "arabic"
+    assert rp.detect_language_style("ezayak 3amel eh") == "arabizi"
+    assert rp.detect_language_style("mfhmsh tmam") == "arabizi"
+    assert rp.detect_language_style("I am sick") == "english"
+    assert rp.detect_language_style("I took amoxicillin و أنا مريض") == "mixed"

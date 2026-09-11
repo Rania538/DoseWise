@@ -33,42 +33,35 @@ function addMessage(text, who='assistant', meta=null, rtl=false){
 
 function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
-function showInteractionCard(retrievals){
-  retrievals.forEach(r=>{
-    const card = document.createElement('div'); card.className='card interaction';
-    const pair = document.createElement('div'); pair.className='pair'; pair.innerText = `${r.drug_a} + ${r.drug_b}`;
-    card.appendChild(pair);
-    const sevLine = document.createElement('div'); sevLine.className='meta-line';
-    if(r.interaction_level){
-      const lvl = String(r.interaction_level).toLowerCase();
-      sevLine.innerHTML = 'Severity: ' + `<span class="badge ${lvl}">${escapeHtml(r.interaction_level)}</span>`;
-    } else {
-      sevLine.innerText = 'Severity: Not identified in DDInter';
+function addStructuredMessage(text, language){
+  if(emptyState) emptyState.style.display = 'none';
+  const el = document.createElement('div');
+  el.className = 'msg assistant structured-response';
+  const rtl = language === 'arabic' || (language === 'mixed' && /[\u0600-\u06FF]/.test(text));
+  if(rtl){ el.classList.add('rtl'); el.setAttribute('dir','rtl'); }
+  const row = document.createElement('div'); row.className='assistant-row';
+  const avatar = document.createElement('div'); avatar.className='assistant-avatar'; avatar.innerText='DW';
+  const body = document.createElement('div'); body.className='content response-content';
+  let section = null;
+  text.split(/\r?\n/).forEach(line => {
+    const heading = line.match(/^(💊|🔍|⚠️|📌|📚)\s+(.+)$/);
+    if(heading){
+      section = document.createElement('section'); section.className='response-section';
+      if(heading[1] === '⚠️' && /severity/i.test(heading[2])) section.classList.add('severity-section');
+      const title = document.createElement('h3'); title.innerText = `${heading[1]} ${heading[2]}`;
+      section.appendChild(title); body.appendChild(section); return;
     }
-    card.appendChild(sevLine);
-    const src = document.createElement('div'); src.className='meta-line'; src.innerText = 'Source: DDInter'; card.appendChild(src);
-    const evidence = document.createElement('div'); evidence.className='meta-line';
-    const references = (r.chunk_ids || []).join(', ');
-    evidence.innerText = references ? `Evidence: DDInter · Record: ${references}` : 'Evidence: DDInter · Record: none';
-    card.appendChild(evidence);
-    chatArea.appendChild(card);
-  })
-}
-
-function showDetectedMeds(extracted=[], verified=[]){
-  if((extracted||[]).length===0 && (verified||[]).length===0) return;
-  const box = document.createElement('div'); box.className='card';
-  const title = document.createElement('div'); title.className='pair'; title.innerText='Detected medications'; box.appendChild(title);
-  const list = document.createElement('div'); list.className='interaction';
-  // try to pair extracted -> resolved by index
-  const max = Math.max(extracted.length, verified.length);
-  for(let i=0;i<max;i++){
-    const e = extracted[i]||''; const v = verified[i]||'';
-    const row = document.createElement('div'); row.className='meta-line'; row.innerText = e ? `${e}${v? ' → '+v : ''}` : (v||'');
-    list.appendChild(row);
-  }
-  box.appendChild(list);
-  chatArea.appendChild(box);
+    if(!line.trim()) return;
+    const target = section || body;
+    if(line.trim().startsWith('- ')){
+      const item = document.createElement('div'); item.className='response-item'; item.innerText = line.trim().slice(2); target.appendChild(item);
+    } else {
+      const paragraph = document.createElement('p'); paragraph.innerText = line; target.appendChild(paragraph);
+      if(section && section.classList.contains('severity-section')) paragraph.classList.add('severity-value');
+    }
+  });
+  row.appendChild(avatar); row.appendChild(body); el.appendChild(row);
+  chatArea.appendChild(el); chatArea.scrollTop = chatArea.scrollHeight;
 }
 
 async function postMessage(message){
@@ -97,20 +90,12 @@ async function postMessage(message){
       return;
     }
 
-    // show detected/resolved meds compactly
-    showDetectedMeds(data.extracted || [], data.verified_generics || []);
-
-    // show structured retrievals then response
-    if(data.retrievals && data.retrievals.length>0){
-      showInteractionCard(data.retrievals);
-    }
-
-    addMessage(data.response,'assistant',null, detectRTL(data.response));
+    addStructuredMessage(data.response || '', data.language_style || data.language || 'english');
 
   }catch(e){
     const t = document.getElementById('typing'); if(t) t.remove();
     addMessage('Something went wrong while checking the medications. Please try again.','assistant');
-  }finally{sendBtn.disabled=false; sendBtn.innerText='Send'}
+  }finally{sendBtn.disabled=false; sendBtn.innerText='Analyze ↗'}
 }
 
 function detectRTL(text){

@@ -246,7 +246,8 @@ def test_tab_arabic_not_medication(monkeypatch):
         res = client.post('/api/chat', json={'message': 'طب'})
         data = res.get_json()
         assert not data.get('verified_generics')
-        assert data['response'] == 'normal chat'
+        assert data['language_style'] == 'arabic'
+        assert data['response'] == 'من فضلك اذكر أسماء الأدوية التي تريد التحقق منها.'
 
 
 def test_safety_intent_bypasses_clarification():
@@ -265,6 +266,29 @@ def test_safety_intent_bypasses_clarification():
             assert data['groq_used'] is False
             assert "emergency or overdose" in data['response']
             assert "Do NOT take any more medication" in data['response']
+
+
+def test_guardrail_responses_follow_arabic_and_arabizi(monkeypatch):
+    _patch_scope_classifier_returns(monkeypatch, True)
+    server.SESSIONS.clear()
+
+    with server.app.test_client() as client:
+        arabic_safety = client.post('/api/chat', json={
+            'message': 'اخدت جرعة زيادة من الدواء، اعمل ايه؟',
+        }).get_json()
+        arabic_oos = client.post('/api/chat', json={
+            'message': 'ما هي عاصمة مصر؟',
+        }).get_json()
+        arabizi_oos = client.post('/api/chat', json={
+            'message': 'eh 3asmet Masr?',
+        }).get_json()
+
+    assert arabic_safety['language_style'] == 'arabic'
+    assert any('\u0600' <= char <= '\u06ff' for char in arabic_safety['response'])
+    assert arabic_oos['language_style'] == 'arabic'
+    assert any('\u0600' <= char <= '\u06ff' for char in arabic_oos['response'])
+    assert arabizi_oos['language_style'] == 'arabizi'
+    assert not any('\u0600' <= char <= '\u06ff' for char in arabizi_oos['response'])
 
 
 # ---------------------------------------------------------------------------
@@ -572,4 +596,4 @@ def test_exact_simvastatin_followup_rag(monkeypatch):
            frozenset(('amoxicillin', 'simvastatin')) in pairs, \
         f"Expected simvastatin pair in retrievals, got pairs: {pairs}"
 
-
+
